@@ -1,0 +1,245 @@
+WITH pricing AS
+  (SELECT knumv,
+          kposn,
+          kschl,
+          kbetr,
+          waers
+   FROM prd_product_tc2.konv
+   WHERE kschl IN ("ZP03",
+                   "ZPFT",
+                   "ZPN0") ),
+                   s507 as 
+                   (
+select distinct zzcakvbeln, spart, zzcakposnr, zzcakauart,werks,matnr, basme
+from prd_product_tc2.s507
+where zzzmeng > 1
+-- and zzcakvbeln = "0400253064"
+
+),
+s507_volume as (
+select zzcakvbeln, matnr, sum (zzzmeng) zzzmeng
+from prd_product_tc2.s507
+where zzzmeng > 1
+--and zzcakvbeln = "0400253064"
+group by 1, 2
+),
+
+  DPO_filter AS
+  (SELECT DISTINCT concat(zzcakvbeln, zzcakposnr) k
+   FROM prd_product_tc2.a875
+   WHERE spart IN ("20",
+                   "22",
+                   "21",
+                   "18") ),
+
+sap as 
+(
+SELECT DISTINCT "SAP Data" sap_SOURCE,
+                  vbkd2.ihrez sap_quote_number,
+                   NULL sap_last_modified_date,
+                        vbkd2.prsdt sap_pricing_date,
+                        vbkd.bstkd sap_contract_name,
+                        s507.zzcakauart sap_contract_type,
+                        vbak.vkorg sap_sales_org,
+                        vbak.vtweg sap_distribution_channel,
+                        vbak.spart sap_division,
+                        vbak.vkbur sap_sales_office,
+                        vbak.vkgrp sap_sales_group,
+                        sold.customer_name sap_customer_name,
+                        vbak.kunnr sap_sold_to_customer,
+                        NULL sap_customer_email,
+                             ltrim(vbak.vbeln, "0") sap_contract_number,
+                             NULL sap_sales_person,
+                                  NULL sap_pros_quote_primarybusinesscontact,
+                                       NULL sap_account_phone,
+                                            NULL sap_pros_quote_line_item_legalentityemail,
+                                                 NULL sap_opportunity_contract_status,
+                                                      NULL sap_pros_quote_internal_notes,
+                                                           NULL sap_pros_quote_external_notes,
+                                                                vbpa.kunnr sap_shipto_erpinformation_erp_id,
+                                                                a875.werks sap_plant,
+                                                                a875.zzinco1 sap_incoterms,
+                                                                a875.zzvktrt sap_mode_of_transport,
+                                                                vbak.audat sap_sap_delivery_start_date,
+                                                                vbak.aedat sap_delivery_end_date,
+                                                                ltrim(s507.matnr, "0") sap_product,
+                                                                core.core_product sap_core_product,
+                                                                cast(vbap.zmeng as double)  sap_quantity,
+                                                                vbap.zieme sap_uom,
+                                                                round(cast(fob_price.kbetr AS float) / 1000, 4) sap_net_price_minus_freight,
+                                                                round(cast(net_price.kbetr AS float) / 1000, 4) sap_net_price,
+                                                                CASE
+                                                                    WHEN round(cast(freight.kbetr AS float) / 1000, 4) IS NULL THEN 0
+                                                                    ELSE round(cast(freight.kbetr AS float) / 1000, 4)
+                                                                END AS sap_freight,                                                                vbkd.zterm sap_terms,
+                                                                vbak.erdat sap_created_date,
+                                                                vbak.aedat sap_modified_date,
+                                                                vbak.ernam sap_created_id,
+                                                                vbup.uvfak item_billing_data_status,
+                                                                vbup.uvall item_data_status,
+                                                                vbup.uvvlk item_delivery_data_status,
+                                                                vbup.gbsta overall_status,
+                                                                vbup.absta rejection_status
+   FROM (select distinct zzcakvbeln, spart, zzcakposnr, matnr, zzinco1, zzvktrt, werks, kunwe   from prd_product_tc2.a875) a875
+   inner join (select vbeln, posnr, abgru, zmeng, zieme  from prd_product_tc2.vbap where abgru is null) vbap on vbap.posnr = a875.zzcakposnr and vbap.vbeln = a875.zzcakvbeln
+   left join (select distinct zzcakvbeln, zzcakposnr, matnr, zzcakauart, basme
+from prd_product_tc2.s507) s507 on s507.zzcakvbeln = a875.zzcakvbeln and s507.zzcakposnr = a875.zzcakposnr and s507.matnr = a875.matnr
+   -- left join s507_volume on a875.zzcakvbeln = s507_volume.zzcakvbeln and a875.matnr = s507_volume.matnr
+   LEFT JOIN prd_product_tc2.vbak ON vbak.vbeln = a875.zzcakvbeln -- and s507.zzcakposnr = vbak.posnr
+LEFT JOIN prd_product_curated_fibi_commercial.dim_sold_to_customer sold ON sold.customer_sold_to_id = vbak.kunnr
+   --LEFT JOIN prd_product_tc2.a875 ON a875.zzcakvbeln = s507.zzcakvbeln
+   --AND a875.zzcakposnr = s507.zzcakposnr
+   LEFT JOIN prd_product_tc2.vbkd ON vbkd.vbeln = a875.zzcakvbeln
+   AND vbkd.posnr = a875.zzcakposnr
+   LEFT JOIN prd_product_tc2.vbkd vbkd2 ON vbkd2.vbeln = a875.zzcakvbeln
+   AND vbkd2.posnr = "NA"
+   LEFT OUTER JOIN
+     (SELECT vbeln,
+             kunnr,
+             row_number() OVER (PARTITION BY vbeln
+                                ORDER BY ship_count DESC) top_one
+      FROM
+        (SELECT vbeln,
+                kunnr,
+                count(kunnr) ship_count
+         FROM prd_product_tc2.vbpa
+         WHERE parvw = 'WE'
+         GROUP BY vbeln,
+                  kunnr) sub) vbpa ON a875.zzcakvbeln = vbpa.vbeln
+   AND vbpa.top_one = 1
+   LEFT JOIN
+     (SELECT *
+      FROM prd_product_curated_fibi_commercial.dim_product_hierarchy_tc2
+      WHERE eff_end_date > now()) core ON core.product_number = ltrim(a875.matnr, "0")
+   LEFT JOIN
+     (SELECT UVFAK,
+             UVALL,
+             UVVLK,
+             GBSTA,
+             ABSTA,
+             vbeln,
+             posnr
+      FROM prd_product_tc2.vbup) vbup ON vbup.vbeln = vbkd.vbeln
+   AND vbup.posnr = vbkd.posnr
+   LEFT JOIN pricing fob_price ON fob_price.knumv = vbak.knumv
+   AND fob_price.kschl = "ZP03"
+   AND fob_price.kposn = vbkd.posnr
+   LEFT JOIN pricing net_price ON net_price.knumv = vbak.knumv
+   AND net_price.kschl = "ZPN0"
+   AND net_price.kposn = vbkd.posnr
+   LEFT JOIN pricing freight ON freight.knumv = vbak.knumv
+   AND freight.kschl = "ZPFT"
+   AND freight.kposn = vbkd.posnr
+   WHERE concat(s507.zzcakvbeln, s507.zzcakposnr) IN (select * from DPO_filter)
+   and cast(vbak.erdat AS TIMESTAMP) > date_add(now(), interval -6 months)
+and a875.spart IN ("20",
+                   "22",
+                   "21",
+                   "18")   
+
+--s507.zzcakvbeln = "0400253064"
+   
+
+                   ),
+/*
+leap as 
+(
+SELECT DISTINCT "LEAP Data" SOURCE,
+                            pros_quote_quotenumber quote_number, --opportunity_id,
+ pros_quote_lastmodifieddate last_modified_date,
+ pros_quote_line_item_effectivepricingdate pricing_date,
+ concat(opportunity_name, " ", pros_quote_name) contract_name,
+ 'missing' contract_type,
+           pros_quote_salesorganization sales_org,
+           pros_quote_distributionchannel distribution_channel,
+           pros_quote_line_item_division division,
+           pros_quote_salesoffice sales_office,
+           'missing' sales_group, -- EG - 112
+ account_name customer_name, --account_name?
+ soldto_erpinformation_erp_id sold_to_number,
+ pros_quote_line_item_legalentityemail customer_email,
+ opportunity_contractnumber contract_number,
+ pros_quote_owner_name sales_person, --
+ pros_quote_primarybusinesscontact,
+ account_phone,
+ pros_quote_line_item_legalentityemail,
+ opportunity_contract_status,
+ pros_quote_internal_notes,
+ pros_quote_external_notes,
+ shipto_erpinformation_erp_id,
+ right(plant_name, 4) plant, --
+ left(pros_quote_line_item_incoterms, 3) Incoterms,
+ mode.mode_code mode_of_transport,
+ pros_quote_line_item_deliverystartdate delivery_start_date,
+ pros_quote_line_item_deliveryenddate delivery_end_date,
+ product_productcode product,
+ product_coreproduct core_product,
+ opportunity_product_lbunitquantity quantity, --pros_quote_totalquantity,
+ CASE
+     WHEN opportunity_product_unitofmeasure = "Each (EA)" THEN "EA"
+     WHEN opportunity_product_unitofmeasure = "Pound (lb)" THEN "LB"
+     WHEN opportunity_product_unitofmeasure = "Metric Ton (MT)" THEN "MT"
+     WHEN opportunity_product_unitofmeasure = "Hundred Weight (CWT)" THEN "CWT"
+     WHEN opportunity_product_unitofmeasure = "Kilogram (kg)" THEN "KG"
+ END AS uom,
+ pros_quote_line_item_netpriceminusfreight net_price_minus_freight,
+ opportunity_product_netprice net_price,
+ opportunity_freightcosts freight,
+ concat("N", lpad(split_part(pros_quote_line_item_paymentterms, " ", 1), 3,  "0")) terms,
+  null created_date,
+  null modified_date,
+  null created_id,
+  null item_billing_data_status,
+  null item_data_status,
+  null item_delivery_data_status,
+  null overall_status,
+  null rejection_status
+FROM prd_product_cpq_leap.sfdc_opportunity_quote_enriched sf
+LEFT JOIN prd_product_curated_fibi_csst_commercial_na.csst_sap_mode_ref MODE ON upper(mode.mode_desc) = upper(sf.pros_quote_line_item_modeoftransport)
+where opportunity_contractnumber is not null
+and 
+
+--WHERE opportunity_contractnumber in ("400253064"
+/*,
+'400252826',
+'400252831',
+'400252835',
+'400252838',
+'400252841',
+'400252847',
+'400252887',
+'400253061',
+'400253064',
+'400253065',
+'400253067',
+'400253068',
+'400253069',
+'400253074',
+'400253076',
+'400253081',
+'400253084',
+'400253085',
+'400253130',
+'400253192'
+--)
+  -- AND product_productcode = "100001224"
+-- LIMIT 5 
+),
+*/
+stacked as 
+(
+select *, concat(sap_contract_number, sap_product) compound_key from sap
+--UNION ALL
+--select *, concat(contract_number, product) compound_key from LEAP
+)
+
+select *, 
+
+case when sap_source = "SAP Data" and item_billing_data_status = "C" and item_data_status = "C" and item_delivery_data_status = "C" and overall_status = "A" and rejection_status = "A"
+then 1
+when sap_source = "LEAP Data"
+then null
+else 0 
+end as contract_satus
+
+from stacked
