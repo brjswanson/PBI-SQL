@@ -1,8 +1,9 @@
-select *
-from 
-actual_shipment_historyprd_internal_fibi_ibp.td_ibp_outbound_demand_keyfigures 
+SELECT *
+FROM 
+`prd_internal_fibi_ibp`.`td_ibp_outbound_demand_keyfigures` 
 
 
+--WHERE (`uomtoid`='__HIVE_DEFAULT_PARTITION__') OR (`uomtoid`='PUM') 
 
-
+LIMIT 100
 
