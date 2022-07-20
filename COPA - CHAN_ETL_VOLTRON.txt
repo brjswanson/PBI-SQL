@@ -1,0 +1,14 @@
+let
+    Source = Excel.CurrentWorkbook(){[Name="OUTPUT"]}[Content],
+    #"Filtered Rows2" = Table.SelectRows(Source, each ([Fiscal Year] = 2022)),
+    #"Changed Type" = Table.TransformColumnTypes(#"Filtered Rows2",{{"Fiscal Year", type text}, {"Fiscal Period", type text}}),
+    #"Removed Columns" = Table.RemoveColumns(#"Changed Type",{"YTD Flag", "MFG", "SC"}),
+    #"Added Custom" = Table.AddColumn(#"Removed Columns", "FiscYearPeriod", each [Fiscal Year]&[Fiscal Period]),
+    #"Filtered Rows" = Table.SelectRows(#"Added Custom", each [FiscYearPeriod] = "20221" or [FiscYearPeriod] = "20222" or [FiscYearPeriod] = "20223"),
+    #"Removed Other Columns" = Table.SelectColumns(#"Filtered Rows",{"Gross Profit", "Material ID", "Customer Attributes (Sold To) Sub-Category 2", "Customer Attributes (Sold To) Sub Channel 1", "Invoiced Quantity"}),
+    #"Reordered Columns" = Table.ReorderColumns(#"Removed Other Columns",{"Material ID", "Customer Attributes (Sold To) Sub-Category 2", "Customer Attributes (Sold To) Sub Channel 1", "Invoiced Quantity", "Gross Profit"}),
+    #"Grouped Rows" = Table.Group(#"Reordered Columns", {"Material ID", "Customer Attributes (Sold To) Sub-Category 2", "Customer Attributes (Sold To) Sub Channel 1"}, {{"QTY", each List.Sum([Invoiced Quantity]), type number}, {"GP", each List.Sum([Gross Profit]), type number}}),
+    #"Added Custom1" = Table.AddColumn(#"Grouped Rows", "GP/CASE", each [GP]/[QTY]),
+    #"Filtered Rows1" = Table.SelectRows(#"Added Custom1", each (not Number.IsNaN([#"GP/CASE"]) and [#"GP/CASE"] <> -#infinity and [#"GP/CASE"] <> #infinity))
+in
+    #"Filtered Rows1"
